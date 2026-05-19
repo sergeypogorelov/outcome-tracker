@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CategoriesModule } from '../categories/categories.module';
 import { MerchantRulesModule } from '../merchant-rules/merchant-rules.module';
 import { TransactionEntity } from './transaction.entity';
+import { TransactionParserService } from './transaction-parser.service';
 import { TransactionsService } from './transactions.service';
 
 @Module({
@@ -11,7 +12,7 @@ import { TransactionsService } from './transactions.service';
     CategoriesModule,
     MerchantRulesModule,
   ],
-  providers: [TransactionsService],
-  exports: [TransactionsService],
+  providers: [TransactionsService, TransactionParserService],
+  exports: [TransactionsService, TransactionParserService],
 })
 export class TransactionsModule {}
