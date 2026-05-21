@@ -5,6 +5,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { CategoryEntity } from './categories/category.entity';
 import { CategoriesModule } from './categories/categories.module';
 import configuration from './config/configuration';
+import { HealthController } from './health.controller';
 import { MerchantRuleEntity } from './merchant-rules/merchant-rule.entity';
 import { MerchantRulesModule } from './merchant-rules/merchant-rules.module';
 import { TelegramModule } from './telegram/telegram.module';
@@ -24,11 +25,6 @@ import { UsersModule } from './users/users.module';
         const config = configuration();
         return {
           type: 'postgres',
-          host: config.database.host,
-          port: config.database.port,
-          username: config.database.user,
-          password: config.database.password,
-          database: config.database.name,
           entities: [
             UserEntity,
             CategoryEntity,
@@ -37,6 +33,16 @@ import { UsersModule } from './users/users.module';
           ],
           synchronize: false,
           autoLoadEntities: true,
+          ...(config.database.url
+            ? { url: config.database.url }
+            : {
+                host: config.database.host,
+                port: config.database.port,
+                username: config.database.user,
+                password: config.database.password,
+                database: config.database.name,
+              }),
+          ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
         };
       },
     }),
@@ -47,5 +53,6 @@ import { UsersModule } from './users/users.module';
     AnalyticsModule,
     TelegramModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}
