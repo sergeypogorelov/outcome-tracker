@@ -19,6 +19,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf<Context> | null = null;
   private launchRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly unauthorizedReply =
+    'Access denied. This bot is restricted to approved Telegram users.';
 
   constructor(
     private readonly configService: ConfigService,
@@ -68,6 +70,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private registerHandlers(bot: Telegraf<Context>): void {
+    bot.use(async (ctx, next) => {
+      if (!this.isAllowedUser(ctx)) {
+        const telegramId = ctx.from?.id;
+        this.logger.warn(`Rejected Telegram user: ${telegramId ?? 'unknown'}`);
+
+        if (ctx.from) {
+          await ctx.reply(this.unauthorizedReply);
+        }
+
+        return;
+      }
+
+      await next();
+    });
+
     bot.start(async (ctx) => {
       await ctx.reply(
         'Привет! Пришли банковскую SMS о расходе, а я распознаю сумму, магазин, категорию и сохраню транзакцию.\n\nКоманды: /summary, /month YYYY-MM, /last, /help',
@@ -115,6 +132,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       await this.handleTransactionMessage(ctx, text);
     });
+  }
+
+  private isAllowedUser(ctx: Context): boolean {
+    const allowedUserIds =
+      this.configService.get<string[]>('telegram.allowedUserIds') ?? [];
+
+    if (allowedUserIds.length === 0) {
+      return true;
+    }
+
+    return ctx.from ? allowedUserIds.includes(String(ctx.from.id)) : false;
   }
 
   private async handleTransactionMessage(ctx: Context, text: string): Promise<void> {

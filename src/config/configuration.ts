@@ -8,6 +8,15 @@ function parseBoolean(value: string | undefined, defaultValue: boolean): boolean
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
 }
 
+function parseCsv(value: string | undefined): string[] {
+  return (
+    value
+      ?.split(',')
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+  );
+}
+
 export default () => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -22,5 +31,6 @@ export default () => ({
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
+    allowedUserIds: parseCsv(process.env.TELEGRAM_ALLOWED_USER_IDS),
   },
 });
