@@ -87,19 +87,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     bot.start(async (ctx) => {
       await ctx.reply(
-        'Привет! Пришли банковскую SMS о расходе, а я распознаю сумму, магазин, категорию и сохраню транзакцию.\n\nКоманды: /summary, /month YYYY-MM, /last, /help',
+        'Hi! Send me a bank SMS about an expense, and I will detect the amount, merchant, category, and save the transaction.\n\nCommands: /summary, /month YYYY-MM, /last, /help',
       );
     });
 
     bot.help(async (ctx) => {
       await ctx.reply(
         [
-          'Доступные команды:',
-          '/summary - расходы за текущий месяц',
-          '/month YYYY-MM - расходы за выбранный месяц',
-          '/last - последние 5 транзакций',
+          'Available commands:',
+          '/summary - expenses for the current month',
+          '/month YYYY-MM - expenses for the selected month',
+          '/last - the last 5 transactions',
           '',
-          'Для записи расхода просто отправь SMS целиком.',
+          'To record an expense, send the full SMS text.',
         ].join('\n'),
       );
     });
@@ -112,7 +112,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const [, value] = ctx.message.text.trim().split(/\s+/, 2);
       const parsed = parseYearMonth(value);
       if (!parsed) {
-        await ctx.reply('Формат команды: /month YYYY-MM');
+        await ctx.reply('Command format: /month YYYY-MM');
         return;
       }
 
@@ -126,7 +126,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.on('text', async (ctx) => {
       const text = ctx.message.text;
       if (text.startsWith('/')) {
-        await ctx.reply('Неизвестная команда. Напиши /help.');
+        await ctx.reply('Unknown command. Send /help.');
         return;
       }
 
@@ -145,17 +145,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return ctx.from ? allowedUserIds.includes(String(ctx.from.id)) : false;
   }
 
-  private async handleTransactionMessage(ctx: Context, text: string): Promise<void> {
+  private async handleTransactionMessage(
+    ctx: Context,
+    text: string,
+  ): Promise<void> {
     const parsed = this.parserService.parse(text);
     if (!parsed) {
       await ctx.reply(
-        'Не смог распознать транзакцию. Попробуй отправить SMS целиком.',
+        'I could not recognize a transaction. Try sending the full SMS text.',
       );
       return;
     }
 
     if (!ctx.from) {
-      await ctx.reply('Не смог определить Telegram пользователя.');
+      await ctx.reply('I could not identify the Telegram user.');
       return;
     }
 
@@ -193,7 +196,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const user = await this.resolveTelegramUser(ctx);
     if (!user) {
-      await ctx.reply('Не смог определить Telegram пользователя.');
+      await ctx.reply('I could not identify the Telegram user.');
       return;
     }
 
@@ -204,13 +207,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handleLastCommand(ctx: Context): Promise<void> {
     const user = await this.resolveTelegramUser(ctx);
     if (!user) {
-      await ctx.reply('Не смог определить Telegram пользователя.');
+      await ctx.reply('I could not identify the Telegram user.');
       return;
     }
 
     const transactions = await this.analyticsService.getLastTransactions(user, 5);
     if (transactions.length === 0) {
-      await ctx.reply('Пока нет записанных транзакций.');
+      await ctx.reply('There are no recorded transactions yet.');
       return;
     }
 
@@ -219,9 +222,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         .map((transaction) => {
           const amount = formatMoney(Number(transaction.amount), transaction.currency);
           const date = transaction.transactionDate.toISOString().slice(0, 10);
-          return `${date} · ${amount} · ${
+          return `${date} | ${amount} | ${
             transaction.merchant ?? 'unknown'
-          } · ${transaction.category?.name ?? 'uncategorized'} · ${
+          } | ${transaction.category?.name ?? 'uncategorized'} | ${
             transaction.necessityLevel
           }`;
         })
@@ -253,10 +256,12 @@ function formatTransactionConfirmation(
   const date = transaction.transactionDate.toISOString().slice(0, 10);
   const merchant = transaction.merchant ?? 'unknown';
 
-  return `Записал расход: ${amount} ${transaction.currency} · ${merchant} · ${classification.categoryName} · ${classification.necessityLevel} · ${date}`;
+  return `Expense recorded: ${amount} ${transaction.currency} | ${merchant} | ${classification.categoryName} | ${classification.necessityLevel} | ${date}`;
 }
 
-function parseYearMonth(value: string | undefined): { year: number; month: number } | null {
+function parseYearMonth(
+  value: string | undefined,
+): { year: number; month: number } | null {
   const match = value?.match(/^(\d{4})-(\d{2})$/);
   if (!match) {
     return null;
@@ -272,22 +277,24 @@ function parseYearMonth(value: string | undefined): { year: number; month: numbe
 }
 
 function formatSummary(summary: ExpenseSummary): string {
-  const monthName = new Intl.DateTimeFormat('ru-RU', {
+  const monthName = new Intl.DateTimeFormat('en-US', {
     month: 'long',
     year: 'numeric',
   }).format(new Date(summary.year, summary.month - 1, 1));
 
-  const lines = [`Расходы за ${monthName}:`];
-  lines.push(`Всего: ${formatMoneyMap(summary.totals)}`);
+  const lines = [`Expenses for ${monthName}:`];
+  lines.push(`Total: ${formatMoneyMap(summary.totals)}`);
   lines.push('');
   lines.push(...formatNestedMoneyMap(summary.byNecessity));
   lines.push('');
-  lines.push('По категориям:');
+  lines.push('By category:');
   lines.push(...formatNestedMoneyMap(summary.byCategory));
 
-  return lines.filter((line, index, all) => {
-    return line !== '' || (all[index - 1] !== '' && all[index + 1] !== '');
-  }).join('\n');
+  return lines
+    .filter((line, index, all) => {
+      return line !== '' || (all[index - 1] !== '' && all[index + 1] !== '');
+    })
+    .join('\n');
 }
 
 function formatNestedMoneyMap(
@@ -295,7 +302,7 @@ function formatNestedMoneyMap(
 ): string[] {
   const entries = Object.entries(values);
   if (entries.length === 0) {
-    return ['Нет расходов.'];
+    return ['No expenses.'];
   }
 
   return entries.map(([key, totals]) => `${key}: ${formatMoneyMap(totals)}`);

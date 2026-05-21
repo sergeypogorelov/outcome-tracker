@@ -1,57 +1,71 @@
 # Telegram Expense Tracker MVP
 
-Минимальное NestJS-приложение для учета расходов через Telegram-бота. Пользователь отправляет текст банковской SMS, бот парсит расход, классифицирует merchant rule-based правилами, сохраняет транзакцию в PostgreSQL и отвечает подтверждением.
+A minimal NestJS application for tracking expenses through a Telegram bot. The
+user sends the text of a bank SMS, the bot parses the expense, classifies it with
+merchant rules, stores the transaction in PostgreSQL, and replies with a
+confirmation.
 
-## Возможности
+## Language Policy
 
-- Прием обычных текстовых сообщений Telegram.
-- Парсинг нескольких SMS-форматов без привязки к одному банку.
-- Rule-based классификация категорий и необходимости: `MUST`, `SEMI`, `LUXURY`.
-- PostgreSQL + TypeORM entities, миграция и seed начальных правил.
-- Команды `/summary`, `/month YYYY-MM`, `/last`, `/start`, `/help`.
-- Unit-тесты парсинга и классификации.
+- Code, code comments, documentation, commit messages, and project configuration
+  text must be written in English.
+- Conversation with contributors may happen in any language.
+- External examples may preserve the source language when they represent real
+  incoming data, such as bank SMS text used by parser fixtures.
 
-## Быстрый запуск
+## Features
 
-1. Установить зависимости:
+- Receives plain text Telegram messages.
+- Parses several SMS formats without being tied to one bank.
+- Classifies categories and necessity levels with rules: `MUST`, `SEMI`,
+  `LUXURY`.
+- Uses PostgreSQL, TypeORM entities, a migration, and seed data for initial
+  merchant rules.
+- Supports `/summary`, `/month YYYY-MM`, `/last`, `/start`, and `/help`.
+- Includes unit tests for parsing and classification.
+
+## Quick Start
+
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Запустить PostgreSQL:
+2. Start PostgreSQL:
 
 ```bash
 docker compose up -d
 ```
 
-3. Создать `.env` на базе `.env.example`:
+3. Create `.env` from `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-4. Создать Telegram-бота через BotFather и вставить токен в `TELEGRAM_BOT_TOKEN`.
+4. Create a Telegram bot with BotFather and set the token in
+   `TELEGRAM_BOT_TOKEN`.
 
-5. Применить миграции:
+5. Run migrations:
 
 ```bash
 npm run migration:run
 ```
 
-6. Добавить начальные категории и merchant rules:
+6. Seed initial categories and merchant rules:
 
 ```bash
 npm run seed
 ```
 
-7. Запустить приложение:
+7. Start the application:
 
 ```bash
 npm run start:dev
 ```
 
-## Примеры SMS
+## SMS Examples
 
 ```text
 Card transaction: 1250.00 RSD at MAXI on 19.05.2026 14:32
@@ -60,34 +74,38 @@ EUR 12.50 spent at Steam on 2026-05-19
 Kupovina: 899 RSD; Mesto: DM; Datum: 19/05/2026 18:10
 ```
 
-## Команды бота
+## Bot Commands
 
-- `/summary` - расходы за текущий месяц.
-- `/month YYYY-MM` - расходы за выбранный месяц.
-- `/last` - последние 5 транзакций.
-- `/help` - справка.
+- `/summary` - expenses for the current month.
+- `/month YYYY-MM` - expenses for the selected month.
+- `/last` - the last 5 transactions.
+- `/help` - command help.
 
-## Скрипты
+## Scripts
 
-- `npm run start:dev` - dev-server NestJS.
-- `npm run build` - сборка TypeScript.
-- `npm test` - unit-тесты Jest.
+- `npm run start:dev` - NestJS development server.
+- `npm run build` - TypeScript build.
+- `npm test` - Jest unit tests.
 - `npm run lint` - ESLint.
-- `npm run migration:generate` - генерация миграции TypeORM.
-- `npm run migration:run` - применение миграций.
-- `npm run migration:revert` - откат последней миграции.
-- `npm run seed` - seed категорий и правил.
+- `npm run migration:generate` - generate a TypeORM migration.
+- `npm run migration:run` - apply migrations.
+- `npm run migration:revert` - revert the last migration.
+- `npm run seed` - seed categories and merchant rules.
 
-## Ограничения MVP
+## MVP Limitations
 
-- Нет Angular frontend.
-- Нет OpenAI integration.
-- Нет авторизации вне Telegram.
-- Нет редактирования транзакций.
-- Нет inline buttons.
-- Нет multi-currency conversion, статистика группирует суммы по валютам.
-- Нет production deployment.
+- No Angular frontend.
+- No OpenAI integration.
+- No authentication outside Telegram.
+- No transaction editing.
+- No inline buttons.
+- No multi-currency conversion; statistics group totals by currency.
+- No production deployment.
 
-## Расширяемость
+## Extensibility
 
-Парсер разбит на стратегии в `TransactionParserService`, классификатор возвращает стабильный контракт `TransactionClassification`, а Telegram-слой только оркестрирует сервисы. Это оставляет место для inline confirmation, ручной правки категорий, обучения merchant rules, OpenAI structured output classifier, Angular dashboard и CSV export.
+The parser is split into strategies in `TransactionParserService`, the classifier
+returns a stable `TransactionClassification` contract, and the Telegram layer
+only orchestrates services. This leaves room for inline confirmation, manual
+category edits, merchant rule learning, an OpenAI structured-output classifier,
+an Angular dashboard, and CSV export.
