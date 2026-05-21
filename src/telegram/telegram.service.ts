@@ -18,6 +18,7 @@ import { UsersService } from '../users/users.service';
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf<Context> | null = null;
+  private launchRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -38,18 +39,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot = new Telegraf(token);
     this.registerHandlers(this.bot);
+    this.launchBot();
+  }
+
+  onModuleDestroy(): void {
+    if (this.launchRetryTimer) {
+      clearTimeout(this.launchRetryTimer);
+    }
+
+    this.bot?.stop('NestJS shutdown');
+  }
+
+  private launchBot(): void {
+    if (!this.bot) {
+      return;
+    }
+
     void this.bot
       .launch()
       .then(() => {
         this.logger.log('Telegram bot started');
       })
       .catch((error: unknown) => {
-        this.logger.error('Failed to start Telegram bot', error);
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to start Telegram bot: ${message}`);
+        this.launchRetryTimer = setTimeout(() => this.launchBot(), 15_000);
       });
-  }
-
-  onModuleDestroy(): void {
-    this.bot?.stop('NestJS shutdown');
   }
 
   private registerHandlers(bot: Telegraf<Context>): void {
