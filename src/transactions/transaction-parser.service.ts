@@ -18,6 +18,7 @@ export class TransactionParserService {
   private readonly strategies: ParserStrategy[] = [
     new CardTransactionStrategy(),
     new SerbianCardTransactionStrategy(),
+    new SerbianVisaPaymentStrategy(),
     new CurrencyFirstSpentStrategy(),
     new SerbianPurchaseStrategy(),
   ];
@@ -56,6 +57,19 @@ class SerbianCardTransactionStrategy implements ParserStrategy {
   parse(message: string): ParsedTransaction | null {
     const match = message.match(
       /potrosnja karticom\s+(?<amount>[\d.,]+)\s*(?<currency>[A-Z]{3}),?\s+trgovac\s+(?<merchant>.+?),\s+datum\s+(?<date>\d{2}\.\d{2}\.\d{4})(?:\s+(?<time>\d{2}:\d{2}))?/i,
+    );
+    if (!match?.groups) {
+      return null;
+    }
+
+    return buildParsed(message, match.groups);
+  }
+}
+
+class SerbianVisaPaymentStrategy implements ParserStrategy {
+  parse(message: string): ParsedTransaction | null {
+    const match = message.match(
+      /placanje\s+\w+\s+karticom\s+\*+\d+:\s*iznos\s+(?<amount>[\d.,]+)\s*(?<currency>[A-Z]{3}),?\s+mesto\s+(?<merchant>.+?),\s+dana\s+(?<date>\d{2}\.\d{2}\.\d{4})\s+u\s+(?<time>\d{2}:\d{2}(?::\d{2})?)h?/i,
     );
     if (!match?.groups) {
       return null;

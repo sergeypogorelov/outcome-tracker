@@ -13,6 +13,10 @@ describe('TransactionParserService', () => {
       { amount: 1250, currency: 'RSD', merchant: 'MAXI' },
     ],
     [
+      'Placanje VISA karticom **4459: iznos 1,960.00RSD, mesto ALLA LANTERNA>N, dana 21.05.2026 u 18:07:13h. Rasp.: RSD 40,414.56. Vasa ALTA banka',
+      { amount: 1960, currency: 'RSD', merchant: 'ALLA LANTERNA>N' },
+    ],
+    [
       'EUR 12.50 spent at Steam on 2026-05-19',
       { amount: 12.5, currency: 'EUR', merchant: 'Steam' },
     ],
