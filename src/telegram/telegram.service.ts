@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  BeforeApplicationShutdown,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Context, Telegraf } from 'telegraf';
 import { AnalyticsService, ExpenseSummary } from '../analytics/analytics.service';
@@ -11,14 +17,20 @@ import {
   ParsedTransaction,
   TransactionParserService,
 } from '../transactions/transaction-parser.service';
+import { NecessityLevel } from '../transactions/necessity-level.enum';
+import { TransactionEntity } from '../transactions/transaction.entity';
 import { TransactionsService } from '../transactions/transactions.service';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
-export class TelegramService implements OnModuleInit, OnModuleDestroy {
+export class TelegramService
+  implements OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
+{
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf<Context> | null = null;
   private launchRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private isLaunching = false;
+  private isStopping = false;
   private readonly unauthorizedReply =
     'Access denied. This bot is restricted to approved Telegram users.';
 
@@ -45,18 +57,37 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
-    if (this.launchRetryTimer) {
-      clearTimeout(this.launchRetryTimer);
-    }
-
-    this.bot?.stop('NestJS shutdown');
+    this.stopBot('NestJS module destroy');
   }
 
-  private launchBot(): void {
+  beforeApplicationShutdown(signal?: string): void {
+    this.stopBot(signal ? `NestJS shutdown (${signal})` : 'NestJS shutdown');
+  }
+
+  private stopBot(reason: string): void {
+    this.isStopping = true;
+
+    if (this.launchRetryTimer) {
+      clearTimeout(this.launchRetryTimer);
+      this.launchRetryTimer = null;
+    }
+
     if (!this.bot) {
       return;
     }
 
+    this.logger.log(`Stopping Telegram bot polling: ${reason}`);
+    this.bot.stop(reason);
+    this.bot = null;
+  }
+
+  private launchBot(): void {
+    if (!this.bot || this.isLaunching || this.isStopping) {
+      return;
+    }
+
+    this.isLaunching = true;
+    this.logger.log('Starting Telegram bot polling');
     void this.bot
       .launch()
       .then(() => {
@@ -65,7 +96,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Failed to start Telegram bot: ${message}`);
-        this.launchRetryTimer = setTimeout(() => this.launchBot(), 15_000);
+        if (!this.isStopping) {
+          this.launchRetryTimer = setTimeout(() => this.launchBot(), 15_000);
+        }
+      })
+      .finally(() => {
+        this.isLaunching = false;
       });
   }
 
@@ -98,6 +134,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           '/summary - expenses for the current month',
           '/month YYYY-MM - expenses for the selected month',
           '/last - the last 5 transactions',
+          '/edit <id|latest> <field> <value> - edit category, necessity, merchant, amount, or date',
           '',
           'To record an expense, send the full SMS text.',
         ].join('\n'),
@@ -121,6 +158,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     bot.command('last', async (ctx) => {
       await this.handleLastCommand(ctx);
+    });
+
+    bot.command('edit', async (ctx) => {
+      await this.handleEditCommand(ctx);
     });
 
     bot.on('text', async (ctx) => {
@@ -173,7 +214,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       classification.categoryName,
     );
 
-    await this.transactionsService.create({
+    const transactionInput = {
       user,
       amount: parsed.amount,
       currency: parsed.currency,
@@ -184,7 +225,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       category,
       necessityLevel: classification.necessityLevel,
       confidence: classification.confidence,
-    });
+    };
+
+    const duplicate =
+      await this.transactionsService.findLikelyDuplicate(transactionInput);
+    if (duplicate) {
+      await ctx.reply(
+        `This transaction already exists:\n${formatSavedTransaction(duplicate)}`,
+      );
+      return;
+    }
+
+    await this.transactionsService.create(transactionInput);
 
     await ctx.reply(formatTransactionConfirmation(parsed, classification));
   }
@@ -222,7 +274,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         .map((transaction) => {
           const amount = formatMoney(Number(transaction.amount), transaction.currency);
           const date = transaction.transactionDate.toISOString().slice(0, 10);
-          return `${date} | ${amount} | ${
+          return `#${transaction.id} | ${date} | ${amount} | ${
             transaction.merchant ?? 'unknown'
           } | ${transaction.category?.name ?? 'uncategorized'} | ${
             transaction.necessityLevel
@@ -230,6 +282,112 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         })
         .join('\n'),
     );
+  }
+
+  private async handleEditCommand(ctx: Context): Promise<void> {
+    const user = await this.resolveTelegramUser(ctx);
+    if (!user) {
+      await ctx.reply('I could not identify the Telegram user.');
+      return;
+    }
+
+    const message = ctx.message as { text?: string } | undefined;
+    const text = message?.text ?? '';
+    const match = text.match(/^\/edit\s+(\S+)\s+(\S+)\s+(.+)$/);
+    if (!match) {
+      await ctx.reply(
+        'Command format: /edit <id|latest> <category|necessity|merchant|amount|date> <value>',
+      );
+      return;
+    }
+
+    const [, reference, field, rawValue] = match;
+    const transaction = await this.resolveEditableTransaction(user, reference);
+    if (!transaction) {
+      await ctx.reply('Transaction not found. Use /last to see recent IDs.');
+      return;
+    }
+
+    const update = await this.parseEditUpdate(field, rawValue);
+    if (!update.ok) {
+      await ctx.reply(update.message);
+      return;
+    }
+
+    const saved = await this.transactionsService.update(transaction, update.value);
+    await ctx.reply(`Transaction updated:\n${formatSavedTransaction(saved)}`);
+  }
+
+  private async resolveEditableTransaction(
+    user: Awaited<ReturnType<TelegramService['resolveTelegramUser']>>,
+    reference: string,
+  ): Promise<TransactionEntity | null> {
+    if (!user) {
+      return null;
+    }
+
+    if (reference.toLowerCase() === 'latest') {
+      return (await this.analyticsService.getLastTransactions(user, 1))[0] ?? null;
+    }
+
+    const id = Number(reference.replace(/^#/, ''));
+    if (!Number.isInteger(id) || id <= 0) {
+      return null;
+    }
+
+    return this.transactionsService.findUserTransaction(user, id);
+  }
+
+  private async parseEditUpdate(
+    field: string,
+    rawValue: string,
+  ): Promise<
+    | { ok: true; value: Parameters<TransactionsService['update']>[1] }
+    | { ok: false; message: string }
+  > {
+    const normalizedField = field.toLowerCase();
+    const value = rawValue.trim();
+
+    if (normalizedField === 'category') {
+      const category = await this.categoriesService.findByName(value);
+      if (!category) {
+        return { ok: false, message: `Unknown category: ${value}` };
+      }
+      return { ok: true, value: { category } };
+    }
+
+    if (normalizedField === 'necessity') {
+      const necessityLevel = value.toUpperCase();
+      if (!isNecessityLevel(necessityLevel)) {
+        return { ok: false, message: 'Necessity must be MUST, SEMI, or LUXURY.' };
+      }
+      return { ok: true, value: { necessityLevel } };
+    }
+
+    if (normalizedField === 'merchant') {
+      return { ok: true, value: { merchant: value || null } };
+    }
+
+    if (normalizedField === 'amount') {
+      const amount = Number(value.replace(',', '.'));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return { ok: false, message: 'Amount must be a positive number.' };
+      }
+      return { ok: true, value: { amount } };
+    }
+
+    if (normalizedField === 'date') {
+      const transactionDate = parseEditableDate(value);
+      if (!transactionDate) {
+        return { ok: false, message: 'Date format: YYYY-MM-DD or YYYY-MM-DD HH:mm' };
+      }
+      return { ok: true, value: { transactionDate } };
+    }
+
+    return {
+      ok: false,
+      message: 'Editable fields: category, necessity, merchant, amount, date.',
+    };
   }
 
   private async resolveTelegramUser(ctx: Context) {
@@ -257,6 +415,39 @@ function formatTransactionConfirmation(
   const merchant = transaction.merchant ?? 'unknown';
 
   return `Expense recorded: ${amount} ${transaction.currency} | ${merchant} | ${classification.categoryName} | ${classification.necessityLevel} | ${date}`;
+}
+
+function formatSavedTransaction(transaction: TransactionEntity): string {
+  const amount = formatMoney(Number(transaction.amount), transaction.currency);
+  const date = transaction.transactionDate.toISOString().slice(0, 10);
+  return `#${transaction.id} | ${date} | ${amount} | ${
+    transaction.merchant ?? 'unknown'
+  } | ${transaction.category?.name ?? 'uncategorized'} | ${
+    transaction.necessityLevel
+  }`;
+}
+
+function isNecessityLevel(value: string): value is NecessityLevel {
+  return Object.values(NecessityLevel).includes(value as NecessityLevel);
+}
+
+function parseEditableDate(value: string): Date | null {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?$/,
+  );
+  if (!match) {
+    return null;
+  }
+
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4] ?? '0'),
+    Number(match[5] ?? '0'),
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function parseYearMonth(

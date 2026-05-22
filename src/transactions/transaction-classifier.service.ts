@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { CategoriesService } from '../categories/categories.service';
 import { MerchantRulesService } from '../merchant-rules/merchant-rules.service';
 import { NecessityLevel } from './necessity-level.enum';
+import { OpenAiTransactionClassifierService } from './openai-transaction-classifier.service';
 import { ParsedTransaction } from './transaction-parser.service';
 
 export interface TransactionClassification {
@@ -8,6 +10,7 @@ export interface TransactionClassification {
   necessityLevel: NecessityLevel;
   confidence: number;
   matchedPattern: string | null;
+  source?: 'database_rule' | 'fallback_rule' | 'openai' | 'manual';
 }
 
 interface RuleDefinition {
@@ -79,10 +82,17 @@ export class TransactionClassifierService {
     },
   ];
 
-  constructor(private readonly merchantRulesService: MerchantRulesService) {}
+  constructor(
+    private readonly merchantRulesService: MerchantRulesService,
+    private readonly categoriesService: CategoriesService,
+    private readonly openAiClassifier: OpenAiTransactionClassifierService,
+  ) {}
 
   async classify(
-    transaction: Pick<ParsedTransaction, 'merchant' | 'description'>,
+    transaction: Pick<
+      ParsedTransaction,
+      'amount' | 'currency' | 'merchant' | 'description'
+    >,
   ): Promise<TransactionClassification> {
     const merchant = `${transaction.merchant ?? ''} ${
       transaction.description ?? ''
@@ -93,7 +103,17 @@ export class TransactionClassifierService {
       return databaseMatch;
     }
 
-    return this.findFallbackRuleMatch(merchant) ?? this.uncategorized();
+    const fallbackMatch = this.findFallbackRuleMatch(merchant);
+    if (fallbackMatch) {
+      return fallbackMatch;
+    }
+
+    const openAiMatch = await this.findOpenAiMatch(transaction);
+    if (openAiMatch) {
+      return openAiMatch;
+    }
+
+    return this.uncategorized();
   }
 
   private async findDatabaseRuleMatch(
@@ -108,6 +128,7 @@ export class TransactionClassifierService {
           necessityLevel: rule.necessityLevel,
           confidence: 0.95,
           matchedPattern: rule.pattern,
+          source: 'database_rule',
         };
       }
     }
@@ -130,11 +151,52 @@ export class TransactionClassifierService {
           necessityLevel: rule.necessityLevel,
           confidence: rule.confidence,
           matchedPattern,
+          source: 'fallback_rule',
         };
       }
     }
 
     return null;
+  }
+
+  private async findOpenAiMatch(
+    transaction: Pick<
+      ParsedTransaction,
+      'amount' | 'currency' | 'merchant' | 'description'
+    >,
+  ): Promise<TransactionClassification | null> {
+    const categories = await this.categoriesService.findAll();
+    const classification = await this.openAiClassifier.classify(
+      transaction,
+      categories,
+    );
+
+    if (
+      !classification ||
+      classification.confidence < this.openAiClassifier.getMinConfidence()
+    ) {
+      return null;
+    }
+
+    const category = categories.find(
+      (item) => item.name === classification.categoryName,
+    );
+    if (category && transaction.merchant) {
+      await this.merchantRulesService.createIfMissing({
+        pattern: normalizeLearnedPattern(transaction.merchant),
+        category,
+        necessityLevel: classification.necessityLevel,
+        priority: 5,
+      });
+    }
+
+    return {
+      categoryName: classification.categoryName,
+      necessityLevel: classification.necessityLevel,
+      confidence: classification.confidence,
+      matchedPattern: null,
+      source: 'openai',
+    };
   }
 
   private uncategorized(): TransactionClassification {
@@ -143,6 +205,7 @@ export class TransactionClassifierService {
       necessityLevel: NecessityLevel.SEMI,
       confidence: 0.3,
       matchedPattern: null,
+      source: 'manual',
     };
   }
 }
@@ -154,4 +217,8 @@ function matchesPattern(value: string, pattern: string): boolean {
   }
 
   return value.includes(normalizedPattern);
+}
+
+function normalizeLearnedPattern(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toUpperCase();
 }

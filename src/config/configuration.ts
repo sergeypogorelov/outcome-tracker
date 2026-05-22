@@ -33,4 +33,16 @@ export default () => ({
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
     allowedUserIds: parseCsv(process.env.TELEGRAM_ALLOWED_USER_IDS),
   },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY ?? '',
+    classifierEnabled: parseBoolean(
+      process.env.OPENAI_CLASSIFIER_ENABLED,
+      false,
+    ),
+    classifierModel:
+      process.env.OPENAI_CLASSIFIER_MODEL ?? 'gpt-4o-mini-2024-07-18',
+    classifierMinConfidence: Number(
+      process.env.OPENAI_CLASSIFIER_MIN_CONFIDENCE ?? '0.75',
+    ),
+  },
 });

@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -12,6 +13,10 @@ import { UserEntity } from '../users/user.entity';
 import { NecessityLevel } from './necessity-level.enum';
 
 @Entity('transactions')
+@Index('IDX_transactions_duplicate_fingerprint', ['duplicateFingerprint'], {
+  unique: true,
+  where: '"duplicateFingerprint" IS NOT NULL',
+})
 export class TransactionEntity {
   @PrimaryGeneratedColumn()
   id: number;
@@ -39,6 +44,9 @@ export class TransactionEntity {
 
   @Column({ type: 'text', nullable: true })
   rawMessage: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  duplicateFingerprint: string | null;
 
   @Column({ type: 'timestamptz' })
   transactionDate: Date;

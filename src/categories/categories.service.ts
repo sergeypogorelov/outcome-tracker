@@ -13,4 +13,8 @@ export class CategoriesService {
   findByName(name: string): Promise<CategoryEntity | null> {
     return this.categoriesRepository.findOne({ where: { name } });
   }
+
+  findAll(): Promise<CategoryEntity[]> {
+    return this.categoriesRepository.find({ order: { name: 'ASC' } });
+  }
 }
